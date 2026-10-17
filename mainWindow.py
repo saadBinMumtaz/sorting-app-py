@@ -1,13 +1,11 @@
-import time
 from PyQt5.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem, QAbstractItemView,
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QComboBox,
-    QCheckBox, QPushButton, QLabel, QProgressBar
+    QCheckBox, QPushButton, QLabel, QApplication
 )
 from PyQt5.QtGui import QColor
 from dataLoader import loadData
 from sortAlgos import algoNames, algoInfo, runSort, whyNot
-from worker import job, startThread
 
 state = {}
 ui = {}
@@ -15,6 +13,7 @@ ui = {}
 
 def fillTable(rows, sortCol=-1):
     table = ui["table"]
+    table.setUpdatesEnabled(False)  # faster while filling
     table.clearContents()
     table.setRowCount(len(rows))
 
@@ -26,6 +25,8 @@ def fillTable(rows, sortCol=-1):
                 item.setBackground(QColor("#2a2a3d"))
 
             table.setItem(i, j, item)
+
+    table.setUpdatesEnabled(True)
 
 
 def buildWindow():
@@ -64,19 +65,11 @@ def buildWindow():
     ui["scopeBox"] = scopeBox
     bar.addWidget(scopeBox)
 
-    progress = QProgressBar()
-    progress.setRange(0, 1)
-    ui["progress"] = progress
-    bar.addWidget(progress)
-
     layout.addLayout(bar)
     layout.addWidget(table)
 
     root = QWidget()
     root.setLayout(layout)
-    timer = QTimer()
-    timer.timeout.connect(checkJob)
-    ui["timer"] = timer
     win.setCentralWidget(root)
 
     table.horizontalHeader().sectionClicked.connect(
@@ -159,24 +152,24 @@ def sourceRows():
 
     return state["shown"]
 
+
 def doSort():
     col = ui["colBox"].currentIndex()
     name = ui["algoBox"].currentText()
     desc = ui["descChk"].isChecked()
     src = sourceRows()
     kind = state["kinds"][col]
+
     why = whyNot(name, src, col, kind)
     if why != "":
         status(name + ": " + why)
         return
 
-    def work(say):
-        return runSort(src, col, kind, name, desc)
+    status("Sorting with " + name + " ... please wait")
+    QApplication.processEvents()  # shows the message before the sort starts
 
-    def onDone(res):
-        sortDone(res, col)
+    sortDone(runSort(src, col, kind, name, desc), col)
 
-    startJob(work, onDone)
 
 def sortDone(result, col):
     rows, ms, comparisons, swaps = result
@@ -187,35 +180,3 @@ def sortDone(result, col):
         f"Time: {ms:.2f} ms | "
         f"Comparisons: {comparisons:,} | Swaps: {swaps:,}"
     )
-
-def allButtons():
-    out = []
-    for key in ("sortBtn", "benchBtn", "sBtn", "rBtn", "mBtn", "fBtn"):
-        if key in ui:  # skip buttons that do not exist yet
-            out.append(ui[key])
-    return out
-
-def setBusy(on):
-    if on:
-        ui["progress"].setRange(0, 0)  # busy bar
-    else:
-        ui["progress"].setRange(0, 1)
-        ui["progress"].setValue(1)
-    for b in allButtons():
-        b.setEnabled(not on)
-
-def startJob(func, onDone):
-    setBusy(True)
-    state["onDone"] = onDone
-    startThread(func)
-    ui["timer"].start(100)
-
-def checkJob():
-    if job["msg"] != "":
-        status(job["msg"])
-    if job["done"]:
-        ui["timer"].stop()
-        setBusy(False)
-        if job["result"] is not None:
-            state["onDone"](job["result"])
-
