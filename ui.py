@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QColor
 from dataLoader import loadData, toKey
-from sortAlgos import algoNames, algoInfo, runSort, whyNot
+from sortAlgos import algoNames, algoInfo, runSort, whyNot, multiSort
 from searchAlgos import strOps, numOps, columnValues, linearSearch, binarySearch, jumpSearch
 
 benchRows = 3000
@@ -76,6 +76,7 @@ def buildWindow():
 
     tabs = QTabWidget()
     tabs.addTab(buildSortTab(), "Sort")
+    tabs.addTab(buildMultiTab(), "Multi-Sort")
     tabs.addTab(buildSearchTab(), "Search")
     ui["tabs"] = tabs
 
@@ -233,6 +234,52 @@ def doBench():
 
     status("Benchmark finished")
     showBenchmark(result, state["cols"][col], len(rows), ui["win"])
+
+
+def buildMultiTab():
+    tab = QWidget()
+    lay = QHBoxLayout(tab)
+    ui["lvls"] = []
+    for i in range(3):
+        cb = QComboBox()
+        cb.addItems(["(none)"] + state["cols"])
+        ob = QComboBox()
+        ob.addItems(["Ascending", "Descending"])
+        lay.addWidget(QLabel(f"Level {i + 1}"))
+        lay.addWidget(cb)
+        lay.addWidget(ob)
+        ui["lvls"].append([cb, ob])
+    mAlgo = QComboBox()
+    mAlgo.addItems(algoNames)
+    mAlgo.setCurrentText("Merge Sort")
+    mBtn = QPushButton("Multi-Sort")
+    mBtn.clicked.connect(doMulti)
+    ui["mAlgo"] = mAlgo
+    lay.addWidget(mAlgo)
+    lay.addWidget(mBtn)
+    return tab
+
+
+def doMulti():
+    lv = []
+    for pair in ui["lvls"]:
+        cb = pair[0]
+        ob = pair[1]
+        if cb.currentIndex() > 0:
+            lv.append((cb.currentIndex() - 1, ob.currentIndex() == 1))
+    if len(lv) == 0:
+        status("Pick at least one level")
+        return
+    rows = sourceRows()
+    name = ui["mAlgo"].currentText()
+    for col, desc in lv:
+        why = whyNot(name, rows, col, state["kinds"][col])
+        if why != "":
+            status(f"{name} can't sort {state['cols'][col]}: {why}")
+            return
+    status("Sorting ... please wait")
+    QApplication.processEvents()
+    sortDone(multiSort(rows, lv, state["kinds"], name))
 
 
 def buildSearchTab():

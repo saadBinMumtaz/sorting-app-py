@@ -234,6 +234,17 @@ def bucketSort(arr):
 
     return result
 
+def multiSort(rows, levels, kinds, name="Merge Sort"):
+ 
+    tms = 0
+    tc = 0
+    ts = 0
+    for col, desc in reversed(levels):
+        rows, ms, c, s = runSort(rows, col, kinds[col], name, desc)
+        tms += ms
+        tc += c
+        ts += s
+    return rows, tms, tc, ts
 
 algoNames = ["Bubble Sort", "Selection Sort", "Insertion Sort", "Merge Sort", "Quick Sort",
              "Heap Sort", "Shell Sort", "Counting Sort", "Radix Sort", "Bucket Sort"]
