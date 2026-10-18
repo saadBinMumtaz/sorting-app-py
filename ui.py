@@ -1,12 +1,13 @@
+import time
 from PyQt5.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem, QAbstractItemView,
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QComboBox,
-    QCheckBox, QPushButton, QLabel, QApplication
+    QCheckBox, QPushButton, QLabel, QLineEdit, QDialog, QApplication
 )
 from PyQt5.QtGui import QColor
-from dataLoader import loadData
+from dataLoader import loadData, toKey
 from sortAlgos import algoNames, algoInfo, runSort, whyNot
-from benchmarkDialog import showBenchmark
+from searchAlgos import strOps, numOps, columnValues, linearSearch, binarySearch, jumpSearch
 
 benchRows = 3000
 state = {}
@@ -29,6 +30,27 @@ def fillTable(rows, sortCol=-1):
             table.setItem(i, j, item)
 
     table.setUpdatesEnabled(True)
+
+
+def showBenchmark(result, colName, n, parent):
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(f"Benchmark: {colName} ({n:,} rows)")
+    dlg.resize(820, 380)
+
+    layout = QVBoxLayout(dlg)
+
+    table = QTableWidget(len(result), 6)
+    table.setHorizontalHeaderLabels(
+        ["Algorithm", "Complexity", "Stable", "Time (ms)", "Comparisons", "Swaps"]
+    )
+
+    for i, row in enumerate(result):
+        for j, value in enumerate(row):
+            table.setItem(i, j, QTableWidgetItem(str(value)))
+
+    table.resizeColumnsToContents()
+    layout.addWidget(table)
+    dlg.exec()
 
 
 def buildWindow():
@@ -54,6 +76,7 @@ def buildWindow():
 
     tabs = QTabWidget()
     tabs.addTab(buildSortTab(), "Sort")
+    tabs.addTab(buildSearchTab(), "Search")
     ui["tabs"] = tabs
 
     layout = QVBoxLayout()
@@ -78,12 +101,27 @@ def buildWindow():
         ui["colBox"].setCurrentIndex
     )
 
-    refresh(rows)
+    showRows(rows)
     return win
 
 
 def status(text):
     ui["win"].statusBar().showMessage(text)
+
+
+def showRows(rows, sortCol=-1):
+    state["shown"] = rows
+    fillTable(rows, sortCol)
+    status(f"Showing {len(rows):,} of {len(state['full']):,} rows")
+
+
+refresh = showRows
+
+
+def sourceRows():
+    if ui["scopeBox"].currentIndex() == 0:
+        return state["full"]
+    return state["shown"]
 
 
 def buildSortTab():
@@ -143,19 +181,6 @@ def onColChange(col):
         ui["algoBox"].setCurrentText(state["algoFor"][col])
 
 
-def refresh(rows, sortCol=-1):
-    state["shown"] = rows
-    fillTable(rows, sortCol)
-    status(f"Showing {len(rows):,} of {len(state['full']):,} rows")
-
-
-def sourceRows():
-    if ui["scopeBox"].currentIndex() == 0:
-        return state["full"]
-
-    return state["shown"]
-
-
 def doSort():
     col = ui["colBox"].currentIndex()
     name = ui["algoBox"].currentText()
@@ -174,15 +199,16 @@ def doSort():
     sortDone(runSort(src, col, kind, name, desc), col)
 
 
-def sortDone(result, col):
+def sortDone(result, col=-1):
     rows, ms, comparisons, swaps = result
 
-    refresh(rows, col)
+    showRows(rows, col)
 
     ui["resLbl"].setText(
         f"Time: {ms:.2f} ms | "
         f"Comparisons: {comparisons:,} | Swaps: {swaps:,}"
     )
+
 
 def doBench():
     col = ui["colBox"].currentIndex()
@@ -207,3 +233,96 @@ def doBench():
 
     status("Benchmark finished")
     showBenchmark(result, state["cols"][col], len(rows), ui["win"])
+
+
+def buildSearchTab():
+    tab = QWidget()
+    lay = QHBoxLayout(tab)
+
+    sCol = QComboBox()
+    sCol.addItems(state["cols"])
+
+    sOp = QComboBox()
+
+    sVal = QLineEdit()
+    sVal.setPlaceholderText("value")
+
+    sAlgo = QComboBox()
+    sAlgo.addItems(["Linear Search", "Binary Search", "Jump Search"])
+
+    sBtn = QPushButton("Search")
+    rBtn = QPushButton("Reset")
+
+    ui["sCol"] = sCol
+    ui["sOp"] = sOp
+    ui["sVal"] = sVal
+    ui["sAlgo"] = sAlgo
+
+    for w in (QLabel("Column"), sCol, sOp, sVal, QLabel("Algorithm"), sAlgo, sBtn, rBtn):
+        lay.addWidget(w)
+
+    sCol.currentIndexChanged.connect(fillOps)
+    sOp.currentTextChanged.connect(checkAlgo)
+    sBtn.clicked.connect(doSearch)
+    rBtn.clicked.connect(doReset)
+
+    fillOps()
+    return tab
+
+
+def fillOps():
+    ui["sOp"].clear()
+    if state["kinds"][ui["sCol"].currentIndex()] == "str":
+        ui["sOp"].addItems(strOps)
+    else:
+        ui["sOp"].addItems(numOps)
+
+
+def checkAlgo():
+    isExact = ui["sOp"].currentText() in ("equals", "=")
+    ui["sAlgo"].setEnabled(isExact)  # only exact match can use binary or jump search
+
+
+def doSearch():
+    col = ui["sCol"].currentIndex()
+    kind = state["kinds"][col]
+    op = ui["sOp"].currentText()
+    name = ui["sAlgo"].currentText()
+
+    try:
+        val = toKey(ui["sVal"].text(), kind)
+    except ValueError:
+        status("Please enter a valid number")
+        return
+
+    isExact = op in ("equals", "=")
+    rows = state["full"]
+
+    if isExact and name != "Linear Search":
+        rows = runSort(rows, col, kind, "Merge Sort")[0]  # binary and jump need sorted rows (not timed)
+
+    if not isExact:
+        name = "Linear Search"
+
+    values = columnValues(rows, col, kind)  # just this column (not timed)
+
+    start = time.perf_counter()
+    if name == "Binary Search":
+        spots = binarySearch(values, val)
+    elif name == "Jump Search":
+        spots = jumpSearch(values, val)
+    else:
+        spots = linearSearch(values, op, val)
+    ms = (time.perf_counter() - start) * 1000
+
+    res = []
+    for i in spots:
+        res.append(rows[i])  # the rows at those positions
+
+    showRows(res)
+    ui["resLbl"].setText(f"{len(res):,} found in {ms:.3f} ms ({name})")
+    status(f"{len(res):,} found in {ms:.3f} ms ({name})")
+
+
+def doReset():
+    showRows(state["full"])
