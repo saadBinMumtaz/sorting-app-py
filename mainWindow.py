@@ -6,7 +6,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QColor
 from dataLoader import loadData
 from sortAlgos import algoNames, algoInfo, runSort, whyNot
+from benchmarkDialog import showBenchmark
 
+benchRows = 3000
 state = {}
 ui = {}
 
@@ -122,6 +124,7 @@ def buildSortTab():
     colBox.currentIndexChanged.connect(onColChange)
     algoBox.currentTextChanged.connect(onAlgoChange)
     sortBtn.clicked.connect(doSort)
+    benchBtn.clicked.connect(doBench)
 
     onAlgoChange(algoBox.currentText())
     return tab
@@ -180,3 +183,27 @@ def sortDone(result, col):
         f"Time: {ms:.2f} ms | "
         f"Comparisons: {comparisons:,} | Swaps: {swaps:,}"
     )
+
+def doBench():
+    col = ui["colBox"].currentIndex()
+    kind = state["kinds"][col]
+    rows = sourceRows()[:benchRows]
+
+    result = []
+
+    for name in algoNames:
+        info = algoInfo[name]
+
+        status("Running " + name + " ...")
+        QApplication.processEvents()
+
+        why = whyNot(name, rows, col, kind)
+
+        if why != "":
+            result.append([name, info[0], info[1], "N/A: " + why, "-", "-"])
+        else:
+            out, ms, c, s = runSort(rows, col, kind, name)
+            result.append([name, info[0], info[1], f"{ms:.2f}", f"{c:,}", f"{s:,}"])
+
+    status("Benchmark finished")
+    showBenchmark(result, state["cols"][col], len(rows), ui["win"])
