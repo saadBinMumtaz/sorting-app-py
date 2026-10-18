@@ -7,7 +7,25 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QColor
 from dataLoader import loadData, toKey
 from sortAlgos import algoNames, algoInfo, runSort, whyNot, multiSort
-from searchAlgos import strOps, numOps, columnValues, linearSearch, binarySearch, jumpSearch
+from searchAlgos import strOps, numOps, columnValues, linearSearch, binarySearch, jumpSearch, compFilter
+
+qss = """
+QWidget { background-color: #1e1e2e; color: #cdd6f4; font-size: 13px; }
+QPushButton { background-color: #89b4fa; color: #1e1e2e; border: none;
+              border-radius: 6px; padding: 6px 14px; font-weight: bold; }
+QPushButton:hover { background-color: #b4befe; }
+QPushButton:disabled { background-color: #45475a; color: #7f849c; }
+QPushButton#go { background-color: #a6e3a1; }
+QPushButton#go:hover { background-color: #94e2d5; }
+QLineEdit, QComboBox, QSpinBox { background-color: #313244; border: 1px solid #45475a;
+                                 border-radius: 4px; padding: 4px; }
+QTableView { background-color: #181825; alternate-background-color: #1e1e2e;
+             gridline-color: #313244; selection-background-color: #89b4fa;
+             selection-color: #1e1e2e; }
+QHeaderView::section { background-color: #313244; padding: 6px; border: none; }
+QTabBar::tab { background: #313244; padding: 8px 16px; }
+QTabBar::tab:selected { background: #89b4fa; color: #1e1e2e; }
+"""
 
 benchRows = 3000
 state = {}
@@ -63,6 +81,7 @@ def buildWindow():
     state["algoFor"] = {}
 
     win = QMainWindow()
+    win.setStyleSheet(qss)
     win.setWindowTitle("Data Sorter")
     win.resize(1300, 750)
     ui["win"] = win
@@ -78,6 +97,7 @@ def buildWindow():
     tabs.addTab(buildSortTab(), "Sort")
     tabs.addTab(buildMultiTab(), "Multi-Sort")
     tabs.addTab(buildSearchTab(), "Search")
+    tabs.addTab(buildCompTab(), "Filters (AND/OR/NOT)")
     ui["tabs"] = tabs
 
     layout = QVBoxLayout()
@@ -137,6 +157,7 @@ def buildSortTab():
 
     descChk = QCheckBox("Descending")
     sortBtn = QPushButton("Sort")
+    sortBtn.setObjectName("go")
     benchBtn = QPushButton("Benchmark")
 
     infoLbl = QLabel()
@@ -373,3 +394,92 @@ def doSearch():
 
 def doReset():
     showRows(state["full"])
+
+
+def makeCondRow(cols, kinds, first):
+    widget = QWidget()
+    lay = QHBoxLayout(widget)
+    lay.setContentsMargins(0, 0, 0, 0)
+    join = QComboBox()
+    join.addItems(["AND", "OR"])
+    join.setVisible(not first)  # no join on first
+    neg = QCheckBox("NOT")
+    colBox = QComboBox()
+    colBox.addItems(cols)
+    opBox = QComboBox()
+    valBox = QLineEdit()
+    for w in (join, neg, colBox, opBox, valBox):
+        lay.addWidget(w)
+
+    def fillOps():
+        opBox.clear()
+        if kinds[colBox.currentIndex()] == "str":
+            opBox.addItems(strOps)
+        else:
+            opBox.addItems(numOps)
+
+    colBox.currentIndexChanged.connect(fillOps)
+    fillOps()
+    return {"widget": widget, "join": join, "neg": neg, "col": colBox,
+            "op": opBox, "val": valBox, "kinds": kinds}
+
+
+def getCond(row):
+    c = row["col"].currentIndex()
+    val = toKey(row["val"].text(), row["kinds"][c])  # may raise ValueError
+    return (c, row["op"].currentText(), val, row["neg"].isChecked())
+
+
+def buildCompTab():
+    tab = QWidget()
+    lay = QVBoxLayout(tab)
+    rowBox = QVBoxLayout()
+    ui["rowBox"] = rowBox
+    lay.addLayout(rowBox)
+    ui["conds"] = []
+    addCond()
+    btns = QHBoxLayout()
+    addBtn = QPushButton("+ Add condition")
+    delBtn = QPushButton("- Remove last")
+    fBtn = QPushButton("Apply filter")
+    fResetBtn = QPushButton("Reset")
+    for b in (addBtn, delBtn, fBtn, fResetBtn):
+        btns.addWidget(b)
+    lay.addLayout(btns)
+    addBtn.clicked.connect(addCond)
+    delBtn.clicked.connect(delCond)
+    fBtn.clicked.connect(doComp)
+    fResetBtn.clicked.connect(doReset)
+    return tab
+
+
+def addCond():
+    first = len(ui["conds"]) == 0
+    row = makeCondRow(state["cols"], state["kinds"], first)
+    ui["conds"].append(row)
+    ui["rowBox"].addWidget(row["widget"])
+
+
+def delCond():
+    if len(ui["conds"]) > 1:
+        row = ui["conds"].pop()
+        row["widget"].setParent(None)
+
+
+def doComp():
+    conds = []
+    try:
+        for row in ui["conds"]:
+            conds.append(getCond(row))
+    except ValueError:
+        status("A number column needs a valid number")
+        return
+    joins = []
+    for row in ui["conds"][1:]:
+        joins.append(row["join"].currentText())
+    t0 = time.perf_counter()
+    res = compFilter(state["full"], conds, joins, state["kinds"])
+    ms = (time.perf_counter() - t0) * 1000
+    showRows(res)
+    ui["resLbl"].setText(f"{len(res):,} found in {ms:.2f} ms (composite filter)")
+    status(f"{len(res):,} found in {ms:.2f} ms (composite filter)")

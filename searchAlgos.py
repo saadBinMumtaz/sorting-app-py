@@ -76,3 +76,36 @@ def jumpSearch(values, val):
             found.append(i)
         i += 1
     return found
+
+
+def matchOne(row, cond, kinds):
+    # col, op, val, neg
+    col, op, val, neg = cond
+    ok = check(makeKey(row[col], kinds[col]), op, val)
+    if neg:
+        return not ok
+    return ok
+
+
+def matchRow(row, conds, joins, kinds):
+    # AND before OR
+    total = False
+    grp = matchOne(row, conds[0], kinds)
+    for i in range(1, len(conds)):
+        m = matchOne(row, conds[i], kinds)
+        if joins[i - 1] == "AND":
+            grp = grp and m
+        else:
+            total = total or grp
+            grp = m
+    return total or grp
+
+
+def compFilter(rows, conds, joins, kinds):
+    if not conds:
+        return list(rows)
+    out = []
+    for r in rows:
+        if matchRow(r, conds, joins, kinds):
+            out.append(r)
+    return out
